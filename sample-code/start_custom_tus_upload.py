@@ -1,62 +1,73 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
 import json
-import os.path
+import os
 import sys
 import time
 
 import qencode
-from qencode import QencodeClientException, QencodeTaskException
+from qencode import QencodeClientException, QencodeTaskException, tus_uploader
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 )
 
-
 # replace with your API KEY (can be found in your Project settings on Qencode portal)
 API_KEY = 'your-api-qencode-key'
 
-# replace with a link to your input video
-source_url = "https://qencode.com/static/1.mp4"
+file_path = '/path/to/file/for/upload'
 
-format_240 = dict(output="mp4", size="320x240", video_codec="libx264")
-
-format_720 = dict(output="mp4", size="1280x720", video_codec="libx264")
-
-format = [format_240, format_720]
-
-query = dict(source=source_url, format=format)
-
-params = dict(query=query)
+query = """
+{"query": {
+  "source": "%s",
+  "format": [
+    {
+      "output": "mp4",
+      "size": "320x240",
+      "video_codec": "libx264"
+    }
+  ]
+  }
+}
+"""
 
 
 def start_encode():
+
     """
     Create client object
     :param api_key: string. required
     :param api_url: string. not required
     :param api_version: int. not required. default 'v1'
     :return: task object
-    """
+  """
 
-    client = qencode.Client(api_key=API_KEY)
+    client = qencode.client(API_KEY)
     if client.error:
         raise QencodeClientException(client.message)
 
-    print('The client created. Expire date: {}'.format(client.expire))
+    print('The client created. Expire date: %s' % client.expire)
 
     task = client.create_task()
 
     if task.error:
         raise QencodeTaskException(task.message)
 
+    # get upload url from endpoint returned with /v1/create_task and task_token value
+    uploadUrl = task.upload_url + '/' + task.task_token
+
+    # do upload and get uploaded file URI
+    uploadedFile = tus_uploader.upload(
+        file_path=file_path, url=uploadUrl, log_func=log_upload, chunk_size=2000000
+    )
+
+    params = query % uploadedFile.url
     task.custom_start(params)
 
     if task.error:
         raise QencodeTaskException(task.message)
 
-    print('Start encode. Task: {}'.format(task.task_token))
+    print('Start encode. Task: %s' % task.task_token)
 
     while True:
         status = task.status()
@@ -65,6 +76,10 @@ def start_encode():
         if status['error'] or status['status'] == 'completed':
             break
         time.sleep(5)
+
+
+def log_upload(msg):
+    print(msg)
 
 
 if __name__ == '__main__':
